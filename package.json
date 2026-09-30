@@ -1,13 +1,15 @@
 {
   "name": "zendesk-integration-demo",
   "private": true,
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
-  "description": "Local, safe mock Zendesk-to-RESTlet integration with JWT authentication and structured logs",
+  "description": "Local Zendesk-to-RESTlet simulator with real SuiteScript handler logic, bounded retries and replay protection",
   "scripts": {
     "demo": "node scripts/run-demo.mjs",
     "test": "node --test tests/*.test.mjs"
   },
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=22"
+  },
   "license": "MIT"
 }

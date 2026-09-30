@@ -1,44 +1,54 @@
-# Architecture, trade-offs and limitations
-
-This local simulator was developed as an independent portfolio example. It does not contain original employer integration scripts or customer information.
-
-## Sequence
+# Architecture, retries and destination consistency
 
 ```mermaid
 sequenceDiagram
   participant App as Integration app
-  participant Z as Local mock ticket API
-  participant Auth as Local mock token API
-  participant Restlet as Local mock RESTlet
-  App->>Z: GET /tickets?page=1 (dummy auth)
-  Z-->>App: Two fictional tickets + next_page
-  App->>Z: GET /tickets?page=2
-  Z-->>App: Two more fictional tickets
-  App->>App: Generate PS256 client assertion
-  App->>Auth: Exchange signed assertion
-  Auth-->>App: Fictional bearer token
+  participant Z as Mock Zendesk API
+  participant Auth as Mock token API
+  participant Target as Mock RESTlet adapter
+  App->>Z: Fetch paginated fictional tickets
+  Z-->>App: Tickets and next_page links
+  App->>Auth: Exchange signed PS256 assertion
+  Auth-->>App: Dummy bearer token
   loop Each ticket
-    App->>App: Map allowlisted fields
-    App->>Restlet: POST mapped record
-    Restlet-->>App: Success / transient / permanent error
-    App->>App: Retry if appropriate, log outcome
+    App->>App: Validate and select fields
+    App->>Target: POST record with request key
+    Target->>Target: Receipt check and SuiteScript upsert
+    Target-->>App: Result or simulated failure
+    App->>App: Retry selected faults; log outcome
   end
-  App->>App: Print aggregate results
+  App->>App: Aggregate successful and failed tickets
 ```
 
-## Security boundaries
+## Request boundary
 
-- No secrets exist in committed files, and RSA keys are generated ephemerally in memory.
-- No outbound connections to vendor services occur during the demo.
-- Requests are deliberately restricted to the local server set up by the demonstration runner.
-- Error logs include only fictional IDs, status codes and error types.
-- Record mapping uses an allowlist rather than forwarding unreviewed customer data.
+`requestJSON` allows only `127.0.0.1` and `[::1]`, rejects embedded URL credentials and refuses redirects. `runSync` requires the ticket, token and destination endpoints to share the local mock origin. Pagination additionally pins the resource path, detects repeated links and stops after 100 pages.
 
-## Limitations and potential extensions
+These guards belong to this local teaching example. They are not a production API client configuration mechanism.
 
-- Production APIs often use cursor pagination; this example intentionally demonstrates an easily testable next-page approach.
-- Production NetSuite authentication must follow current vendor requirements; mock JWT claims are educational.
-- Retries in this demo are short and deterministic. Production retries should use exponential backoff with jitter and `Retry-After` where applicable.
-- Idempotency here is illustrated with a header. A real target must enforce idempotency or deduplication server-side.
-- This demo starts fresh on each run. Production integrations need incremental synchronisation, checkpointing, dead-letter queues and alerting.
-- Add metrics and integration-level monitoring before adapting for any real environment.
+## Retry policy
+
+Only destination sends are retried. Transient statuses are 429, 500, 502, 503 and 504; classified network errors and timeouts are also retryable. Authentication and ticket-fetch failures stop the batch. Invalid JSON, validation failures and other permanent statuses are not repeatedly sent.
+
+Retry count is bounded to three attempts by default. Exponential delays use full jitter. A valid Retry-After header takes precedence, including HTTP-date values. A server wait above the demo's 30-second retry budget is surfaced as a failure rather than shortened. Sleep, clock and random sources can be injected for deterministic tests.
+
+## Two consistency layers
+
+1. **Mock HTTP receipts:** a key derived from the selected record identifies the same request. A stored receipt returns the prior result. Reusing a key with a different body returns a conflict. The lost-response scenario commits and stores its receipt before disconnecting.
+2. **SuiteScript upsert decisions:** records are found by source external ID. Identical source versions are unchanged, older events are ignored, and newer events update the same record. A changed payload with an unchanged source timestamp is rejected.
+
+The HTTP receipt cache is **mock middleware behaviour**, not a claim that NetSuite automatically honours an Idempotency-Key header. Its state is in memory and is lost when the simulator exits. The SuiteScript lookup/update sequence is not an atomic distributed transaction. A production system needs durable receipts and an appropriate concurrency or uniqueness strategy; this example does not claim exactly-once delivery.
+
+## Adapter boundary
+
+`mock/netsuite-adapter.mjs` evaluates only the committed RESTlet file, not user-supplied code. It supplies the used record/search/error interfaces. This keeps the destination decisions in one source file while allowing local tests. The adapters do not reproduce all NetSuite behaviour.
+
+## Logging and privacy
+
+Events include fictional ticket IDs, destination IDs, actions, retry counts and safe error codes. Raw exception messages, JWTs, tokens and record bodies are not logged. The field map drops sample email and private-note fields, but real subject text would still need its own privacy policy.
+
+## Vendor references
+
+- [Zendesk offset pagination](https://developer.zendesk.com/documentation/api-basics/pagination/paginating-through-lists-using-offset-pagination/) — this small demo uses next-page responses; cursor/incremental export is a separate production decision.
+- [NetSuite client assertion structure](https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/section_162790605110.html) — account certificates, claims and scopes must follow the provider configuration.
+- [NetSuite RESTlet example](https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/section_4634148062.html) — reference for the SuiteScript RESTlet module/entry-point pattern.

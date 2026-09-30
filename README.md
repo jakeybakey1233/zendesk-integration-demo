@@ -1,86 +1,74 @@
-# Zendesk → RESTlet integration (local mock)
+# Zendesk → NetSuite RESTlet integration demo
 
-[![Tests](https://img.shields.io/badge/tests-Node.js-265c54)](#tests) [![API](https://img.shields.io/badge/approach-REST%20%2B%20JWT-355d76)](#architecture)
+[![Tests](https://github.com/jakeybakey1233/zendesk-integration-demo/actions/workflows/tests.yml/badge.svg)](https://github.com/jakeybakey1233/zendesk-integration-demo/actions/workflows/tests.yml)
 
-A **safe, original, AI-assisted portfolio demonstration** of a ticket integration. It simulates fetching paginated Zendesk tickets, creating a signed JWT client assertion, exchanging it for a bearer token, mapping **allowlisted** ticket fields, and sending records to a mock RESTlet with per-ticket logs and retry handling.
+A local integration simulator inspired by the Zendesk, NetSuite and API integration work I carried out at **Fourth**. It fetches fictional tickets, signs a PS256 client assertion, maps a small set of fields, and executes a SuiteScript RESTlet handler against an in-memory NetSuite adapter.
 
-> This is **not** a production integration, a production NetSuite client or a drop-in live connector. The ticket data, endpoints, credentials and destination records are fictional. Every demo HTTP request goes to a local mock server. Never upload genuine employer scripts, private keys, credentials, customer records or internal endpoints.
+**[Fourth experience case study](docs/case-study.md)** · [Architecture and failure handling](docs/architecture.md) · [RESTlet schema](netsuite/README.md)
 
-## Quick start
+## Run it
 
-**Requires:** Node.js 20+. No third-party packages or cloud accounts.
+Node.js 22 or newer. No packages, credentials or vendor accounts are needed.
 
 ```bash
 npm run demo
-```
-
-Expected result (IDs are dummy values):
-
-```text
-{"event":"tickets_fetched","count":4}
-{"event":"authenticated","token_received":true}
-{"event":"ticket_sent","zendesk_id":2001,"destination_record_id":"EXAMPLE-2001","attempts":1}
-{"event":"ticket_sent","zendesk_id":2002,"destination_record_id":"EXAMPLE-2002","attempts":1}
-{"event":"ticket_sent","zendesk_id":2003,"destination_record_id":"EXAMPLE-2003","attempts":2}
-{"event":"ticket_failed","zendesk_id":2004,"status":400,"error":"RECORD_NOT_FOUND"}
-{"event":"sync_complete","fetched":4,"sent":3,"failed":1}
-```
-
-The local mock deliberately generates a recoverable HTTP 503 for one ticket, and a permanent record-not-found error for another. The program records failures instead of treating every response as a successful batch.
-
-## Architecture
-
-```mermaid
-flowchart TD
-  Z[Local mock Zendesk API] -->|Two paginated results| F[Ticket fetch]
-  J[Ephemeral RSA signing key] -->|Signed JWT| T[Local fake OAuth endpoint]
-  T -->|Bearer token| F
-  F --> M[Allowlisted ticket mapping]
-  M --> S[Send to mock RESTlet]
-  S --> R{Result}
-  R -->|Success| L[Per-ticket success log]
-  R -->|Transient error| S
-  R -->|Permanent error| E[Per-ticket failure log]
-  L --> C[Final summary]
-  E --> C
-```
-
-The diagram simplifies execution order: ticket fetching is completed before token exchange in this demo.
-
-## Engineering details
-
-- **Pagination:** follows a fake `next_page` URL, checks that the origin is unchanged and guards against loops.
-- **Authentication:** demonstrates cryptographically signed PS256 JWTs using Node's built-in crypto library. A disposable RSA key pair exists only in memory.
-- **Data minimisation:** mapping explicitly includes only ID, subject, status, priority and update time. Dummy private notes and email addresses are discarded.
-- **Resilience:** retries selected transient HTTP responses and records permanent RESTlet errors without crashing the whole sync.
-- **Observability:** logs individual ticket outcomes and aggregate counts without printing secrets or entire ticket payloads.
-- **No external calls:** the mock server binds to `127.0.0.1` on an ephemeral port.
-
-The JWT claims and endpoint paths are educational examples. **A real NetSuite integration needs vendor-specific account configuration, certificates, claims, scopes, rate-limit handling and reviewed security controls.** This project deliberately doesn't provide a production connection or handle real credentials.
-
-## Tests
-
-```bash
 npm test
 ```
 
-The tests verify the JWT signature, safe ticket mapping, pagination, retry behaviour, and permanent-error handling against the local mock server.
+The demo runs the same batch twice. On the first pass, three records succeed, one recovers from an injected HTTP 503, and one produces a deliberate permanent error. On the replay, the three successful records reuse their receipts:
+
+```text
+FIRST SYNC: pagination, a transient retry and a permanent error
+... tickets_fetched: 4
+... ticket_retry: 2003, HTTP 503
+... sync_complete: fetched 4, sent 3, failed 1
+REPLAY: the same successful records must not be written twice
+... ticket_sent: replayed true
+... destination_state: records 3, writes 3
+```
+
+Detailed output is newline-delimited JSON. The failure is an intentional teaching scenario, so `npm run demo` exits successfully when the expected state is verified.
+
+## What this demonstrates
+
+- **Pagination:** follows offset `next_page` responses with origin, path, loop and page-count guards.
+- **Authentication:** signs and verifies PS256 JWT client assertions with a disposable in-memory RSA key.
+- **Field mapping:** validates ticket IDs, statuses and timestamps; selects explicit fields instead of forwarding whole tickets.
+- **Real handler logic:** `netsuite/ticket-sync-restlet.js` contains SuiteScript 2.1 record search, validation and create/update decisions. The simulator executes this same file through explicit `N/record`, `N/search` and `N/error` adapters.
+- **Resilience:** bounded exponential backoff with jitter, `Retry-After` support, timeout/network retry classification and permanent-error isolation.
+- **Replay protection:** request receipts prevent a duplicate write after a committed response is lost. Keys change for new payload versions.
+- **Version handling:** the RESTlet ignores stale events, treats identical versions as unchanged, and rejects conflicting payloads with the same timestamp.
+- **Observability:** per-ticket outcomes, attempt counts and summaries without raw payloads or authentication material.
+
+## Failure tests
+
+Tests cover normal pagination, 503 recovery, 429 waits, exhausted retries, malformed JSON, HTTP redirects, unsafe next-page links, request timeouts, lost responses after commit, idempotency conflicts and RESTlet create/update/stale-event behaviour.
+
+A lost-response test is particularly useful: the target has already written a record before the connection is dropped. A retry succeeds from its stored receipt while the record and write counts both remain **one**.
+
+## Local-only boundary
+
+Every URL is checked before a request. Only literal loopback hosts are allowed; the runner requires one mock-server origin; redirects are rejected. Signing keys never reach disk, and committed tokens are obvious dummy values.
+
+This is a portfolio simulator, **not a live NetSuite connector**. The mock uses vendor-shaped paths, but real account authentication, certificates, permissions and error formats require their own configuration and review. Field selection is not anonymisation: real ticket subjects can contain personal information. Keep the fixtures fictional.
 
 ## Layout
 
 ```text
-src/auth.mjs             PS256 JWT signing
-src/http.mjs             JSON request and HTTP error handling
-src/clients.mjs          Paginated fetch, demo token exchange, RESTlet client
-src/transform.mjs        Allowlisted field mapping
-src/sync.mjs             Orchestration, retries, safe structured logs
-mock/server.mjs          In-process fake Zendesk, OAuth and RESTlet services
-scripts/run-demo.mjs     One-command local demonstration
-tests/integration.test.mjs
+src/auth.mjs                  PS256 assertion signing
+src/http.mjs                  Loopback boundary, timeouts and safe error types
+src/clients.mjs               Pagination, token exchange and stable request keys
+src/transform.mjs             Explicit field selection and validation
+src/sync.mjs                  Orchestration, retries and structured events
+netsuite/ticket-sync-restlet.js SuiteScript validation and record upsert
+mock/netsuite-adapter.mjs      In-memory implementations of the used N/* APIs
+mock/server.mjs               Fictional ticket/auth services and fault injection
+scripts/run-demo.mjs           Two-pass demonstration with write-count assertion
+tests/integration.test.mjs     Domain and HTTP integration regressions
 ```
 
-Read [technical notes](docs/architecture.md) for constraints and possible next steps.
+## Experience and provenance
 
-## Licence
+At Fourth I worked on Zendesk-to-NetSuite cloud integration, Zendesk-to-Salesforce middleware, REST APIs, RESTlets, SuiteScripts and cross-system administration. The exact fields, ticket workflow, JWT configuration and failure fixtures in this repository are independent demonstration choices, not claims about Fourth's production implementation.
 
-MIT for this original example. Zendesk and NetSuite are trademarks of their respective owners. No affiliation or endorsement is implied.
+This original public example was developed with AI assistance. It contains no employer source, customer records or live credentials. MIT applies to this example; Zendesk and NetSuite are their respective owners' trademarks. No affiliation or endorsement is implied.

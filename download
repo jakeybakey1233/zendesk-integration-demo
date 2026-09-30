@@ -8,3 +8,6 @@ node_modules/
 *.pfx
 .DS_Store
 coverage/
+test-results/
+playwright-report/
+npm-debug.log*
