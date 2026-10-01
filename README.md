@@ -2,8 +2,6 @@
 
 [![Tests](https://github.com/jakeybakey1233/zendesk-integration-demo/actions/workflows/tests.yml/badge.svg)](https://github.com/jakeybakey1233/zendesk-integration-demo/actions/workflows/tests.yml)
 
-A local integration simulator inspired by the Zendesk, NetSuite and API integration work I carried out at **Fourth**. It fetches fictional tickets, signs a PS256 client assertion, maps a small set of fields, and executes a SuiteScript RESTlet handler against an in-memory NetSuite adapter.
-
 **[Fourth experience case study](docs/case-study.md)** · [Architecture and failure handling](docs/architecture.md) · [RESTlet schema](netsuite/README.md)
 
 ## Run it
@@ -66,9 +64,3 @@ mock/server.mjs               Fictional ticket/auth services and fault injection
 scripts/run-demo.mjs           Two-pass demonstration with write-count assertion
 tests/integration.test.mjs     Domain and HTTP integration regressions
 ```
-
-## Experience and provenance
-
-At Fourth I worked on Zendesk-to-NetSuite cloud integration, Zendesk-to-Salesforce middleware, REST APIs, RESTlets, SuiteScripts and cross-system administration. The exact fields, ticket workflow, JWT configuration and failure fixtures in this repository are independent demonstration choices, not claims about Fourth's production implementation.
-
-This original public example was developed with AI assistance. It contains no employer source, customer records or live credentials. MIT applies to this example; Zendesk and NetSuite are their respective owners' trademarks. No affiliation or endorsement is implied.
